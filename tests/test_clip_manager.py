@@ -8,9 +8,9 @@ No GPU, model weights, or interactive input required.
 """
 
 from __future__ import annotations
-from unittest.mock import patch
 
 import os
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -22,7 +22,9 @@ from clip_manager import (
     is_image_file,
     is_video_file,
     map_path,
+    organize_clips,
     organize_target,
+    scan_clips,
 )
 
 # ---------------------------------------------------------------------------
@@ -292,6 +294,7 @@ class TestOrganizeTarget:
         # Original loose files should be gone
         assert not (shot / "frame_0000.png").exists()
 
+
 # ---------------------------------------------------------------------------
 # organize_clips
 # ---------------------------------------------------------------------------
@@ -299,7 +302,7 @@ class TestOrganizeTarget:
 class TestOrganizeClips:
     """
     Legacy wrapper tests for organizing the main Clips directory.
-    
+
     This handles moving loose video files into structured folders and then
     triggering organize_target on all subdirectories.
     """
@@ -307,9 +310,9 @@ class TestOrganizeClips:
     def test_organize_loose_video_file(self, tmp_path):
         """
         Tests that a loose .mp4 file is moved into its own folder.
-        
-        Before: /ClipsForInference/shot_001.mp4
-        After:  /ClipsForInference/shot_001/Input.mp4 (plus empty Hint folders)
+
+        Scenario: A directory contains a loose video file like 'shot_001.mp4'.
+        Expected: A new folder 'shot_001' is created, containing 'Input.mp4' and an empty 'AlphaHint' directory.
         """
         clips_dir = tmp_path / "ClipsForInference"
         clips_dir.mkdir()
@@ -318,7 +321,6 @@ class TestOrganizeClips:
         video_file.write_text("test_video_data")
 
         with patch("clip_manager.organize_target") as mock_target:
-            from clip_manager import organize_clips
             organize_clips(str(clips_dir))
 
         target_folder = clips_dir / "shot_001"
@@ -331,84 +333,189 @@ class TestOrganizeClips:
     def test_skips_video_if_folder_exists(self, tmp_path, caplog):
         """
         Tests that a video is skipped if a folder with its name already exists.
-        
-        Before: /ClipsForInference/shot_001.mp4 AND /ClipsForInference/shot_001/
-        After:  Files remain unchanged and a warning is logged via caplog.
+
+        Scenario: Both 'shot_001.mp4' and a folder named 'shot_001' exist.
+        Expected: The original file is left alone, and a conflict warning is logged.
         """
         clips_dir = tmp_path / "ClipsForInference"
         clips_dir.mkdir()
-        
+
         video_path = clips_dir / "shot_001.mp4"
         video_path.write_text("data")
-        
+
         conflict_folder = clips_dir / "shot_001"
         conflict_folder.mkdir()
 
-        from clip_manager import organize_clips
+
+
         organize_clips(str(clips_dir))
         assert video_path.exists(), "The video was moved even though a folder existed!"
         assert "already exists" in caplog.text
-    
+
     def test_ignores_protected_folders(self, tmp_path):
         """
         Tests that 'Output' and 'IgnoredClips' folders are not processed.
-        
-        Before: Directories /shot_001, /Output, /IgnoredClips
-        After:  organize_target is ONLY called for /shot_001.
+
+        Scenario: Directory contains a valid shot folder plus 'Output' and 'IgnoredClips'.
+        Expected: 'organize_target' is called exactly once (only for the valid shot).
         """
         clips_dir = tmp_path / "ClipsForInference"
         clips_dir.mkdir()
-        
+
         (clips_dir / "shot_001").mkdir()
         (clips_dir / "Output").mkdir()
         (clips_dir / "IgnoredClips").mkdir()
 
         with patch("clip_manager.organize_target") as mock_target:
-            from clip_manager import organize_clips
+
+
             organize_clips(str(clips_dir))
 
         mock_target.assert_any_call(str(clips_dir / "shot_001"))
-        
+
         assert mock_target.call_count == 1, f"Expected 1 call, but got {mock_target.call_count}"
 
     def test_handles_nonexistent_directory(self, caplog):
         """
         Tests that the function exits gracefully if the directory is missing.
-        
-        Before: A path that does not exist on disk.
-        After:  Function returns early and a warning is logged with the missing path.
+
+        Scenario: The provided path does not exist on the filesystem.
+        Expected: Function logs a 'directory not found' warning and returns early.
         """
         fake_path = "/tmp/ghost_directory_12345"
-        
-        from clip_manager import organize_clips
-        
+
         organize_clips(fake_path)
-        
+
         assert "directory not found" in caplog.text
         assert fake_path in caplog.text
 
     def test_batch_organization_mix(self, tmp_path):
         """
         Tests that the function handles a mix of loose videos and folders at once.
-        
-        Before: /shot_A.mp4 (loose) AND /shot_B/ (existing folder)
-        After:  /shot_A/ is created; organize_target called for BOTH A and B.
+
+        Scenario: Directory contains one loose video and one already existing folder.
+        Expected: The video is migrated, and 'organize_target' is called for both.
         """
         clips_dir = tmp_path / "ClipsForInference"
         clips_dir.mkdir()
 
         video_a = clips_dir / "shot_A.mp4"
         video_a.write_text("video_data")
-        
+
         folder_b = clips_dir / "shot_B"
         folder_b.mkdir()
 
         with patch("clip_manager.organize_target") as mock_target:
-            from clip_manager import organize_clips
+
+
             organize_clips(str(clips_dir))
 
         assert (clips_dir / "shot_A" / "Input.mp4").exists()
-        
+
         mock_target.assert_any_call(str(clips_dir / "shot_A"))
         mock_target.assert_any_call(str(clips_dir / "shot_B"))
         assert mock_target.call_count == 2
+
+# ---------------------------------------------------------------------------
+# scan_clips
+# ---------------------------------------------------------------------------
+
+class TestScanClips:
+    """
+    Tests for the scan_clips orchestrator.
+    Ensures directory health, automatic organization, and validation reporting.
+    """
+
+    @patch("clip_manager.os.makedirs")
+    @patch("clip_manager.os.path.exists", return_value=False)
+    def test_empty_start_creates_dir(self, _mock_exists, mock_makedirs):
+        """
+        Scenario: The Clips directory is missing entirely.
+        Expected: Function creates the directory and returns an empty list.
+        """
+        results = scan_clips()
+
+        assert results == []
+        mock_makedirs.assert_called_once()
+
+    def test_noise_filter_skips_hidden_folders(self, tmp_path):
+        """
+        Scenario: Folder contains .git, _internal, and IgnoredClips.
+        Expected: These are ignored and not processed as potential clips.
+        """
+        clips_dir = tmp_path / "Clips"
+        clips_dir.mkdir()
+        (clips_dir / ".git").mkdir()
+        (clips_dir / "_cache").mkdir()
+        (clips_dir / "IgnoredClips").mkdir()
+        (clips_dir / "valid_shot").mkdir()
+
+        with (patch("clip_manager.CLIPS_DIR", str(clips_dir)),
+             patch("clip_manager.organize_clips"),
+             patch("clip_manager.ClipEntry") as mock_entry):
+
+            scan_clips()
+
+            assert mock_entry.call_count == 1
+            mock_entry.assert_called_with("valid_shot", str(clips_dir / "valid_shot"))
+
+    def test_clean_run_returns_valid_entries(self, tmp_path):
+        """
+        Scenario: Multiple valid folders exist.
+        Expected: Returns a list of ClipEntry objects that have been validated.
+        """
+        clips_dir = tmp_path / "Clips"
+        clips_dir.mkdir()
+        (clips_dir / "shot_001").mkdir()
+
+        with (patch("clip_manager.CLIPS_DIR", str(clips_dir)),
+             patch("clip_manager.organize_clips"),
+             patch("clip_manager.ClipEntry") as mock_entry):
+
+            instance = mock_entry.return_value
+
+            results = scan_clips()
+
+            assert len(results) == 1
+            instance.find_assets.assert_called_once()
+            instance.validate_pair.assert_called_once()
+
+    def test_invalid_clip_reporting(self, tmp_path, capsys):
+        """
+        Scenario: A folder exists but ClipEntry raises a ValueError (e.g., missing video).
+        Expected: The clip is added to invalid_clips and printed to the console.
+        """
+        clips_dir = tmp_path / "Clips"
+        clips_dir.mkdir()
+        (clips_dir / "broken_shot").mkdir()
+
+        with (patch("clip_manager.CLIPS_DIR", str(clips_dir)),
+             patch("clip_manager.organize_clips"),
+             patch("clip_manager.ClipEntry") as mock_entry):
+
+            mock_entry.return_value.find_assets.side_effect = ValueError("Missing Input.mp4")
+            results = scan_clips()
+            captured = capsys.readouterr()
+
+            assert results == []
+            assert "INVALID OR SKIPPED CLIPS" in captured.out
+            assert "broken_shot: Missing Input.mp4" in captured.out
+
+    def test_crash_recovery_continues_loop(self, tmp_path):
+        """
+        Scenario: One folder causes an unexpected Exception.
+        Expected: The function catches the error for that folder and continues to the next.
+        """
+        clips_dir = tmp_path / "Clips"
+        clips_dir.mkdir()
+        (clips_dir / "crash_shot").mkdir()
+        (clips_dir / "good_shot").mkdir()
+
+        with (patch("clip_manager.CLIPS_DIR", str(clips_dir)),
+             patch("clip_manager.organize_clips"),
+             patch("clip_manager.ClipEntry") as mock_entry):
+
+            mock_entry.side_effect = [Exception("Disk Error"), mock_entry.return_value]
+            results = scan_clips()
+
+            assert len(results) == 1
