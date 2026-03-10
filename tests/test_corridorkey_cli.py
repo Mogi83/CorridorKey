@@ -1,5 +1,24 @@
 """
-Tests for corridorkey_cli.py
+Tests corridorkey_cli.py.
+
+This suite verifies the CLI entry points, the interactive Wizard state machine,
+and the automated routing logic. It mocks the underlying processing engines
+(GVM, VideoMaMa, Inference) to isolate the workflow orchestration from the
+heavy-duty image processing.
+
+These 24 tests have 99% coverage per pytest only missing:
+- 168->179:
+There is some tricky logic to get the code into a point where this logic would apply
+I was unable to reach the state required to preform testing.
+
+- 316->exit:
+Terminal branch logic in the wizard's argument validation, could not get tested.
+
+- 330:
+The standard `if __name__ == "__main__":` entry point, felt unnecessary.
+
+Using mocks in line with project goals of keeping tests and VRAM separate.
+
 """
 
 import logging
