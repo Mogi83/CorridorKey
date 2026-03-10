@@ -626,6 +626,15 @@ class TestVideoMaMa:
         """
         caplog.set_level("ERROR")
         path = stage_shot("shot_fail")
+        
+        input_dir = path / "Input"
+        mask_dir = path / "VideoMamaMaskHint"
+        input_dir.mkdir(parents=True, exist_ok=True)
+        mask_dir.mkdir(parents=True, exist_ok=True)
+        dummy_img = np.zeros((10, 10, 3), np.uint8)
+        cv2.imwrite(str(input_dir / "001.png"), dummy_img)
+        cv2.imwrite(str(mask_dir / "001.png"), dummy_img)
+
         clip = ClipEntry("shot_fail", str(path))
         clip.find_assets()
 
@@ -634,10 +643,8 @@ class TestVideoMaMa:
         with patch(target, side_effect=RuntimeError("GPU OOM")):
             run_videomama([clip])
 
-        log_text = caplog.text
-        assert "VideoMaMa failed" in log_text
-        assert "GPU OOM" in log_text
-
+        assert "VideoMaMa failed" in caplog.text
+        assert "GPU OOM" in caplog.text
 
 # ---------------------------------------------------------------------------
 # organize_target
