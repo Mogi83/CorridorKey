@@ -38,6 +38,8 @@ def _make_engine_with_mock(mock_greenformer, img_size=64):
     engine.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
     engine.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
     engine.model = mock_greenformer
+    engine.model_precision = torch.float32
+    engine.mixed_precision = True
     return engine
 
 
@@ -78,6 +80,22 @@ class TestProcessFrameOutputs:
         for key in ("alpha", "fg", "comp", "processed"):
             assert result[key].dtype == np.float32, f"{key} should be float32"
 
+    def test_alpha_output_range_is_zero_to_one(self, sample_frame_rgb, sample_mask, mock_greenformer):
+        """Alpha output must be in [0, 1] — values outside this range corrupt compositing."""
+        engine = _make_engine_with_mock(mock_greenformer)
+        result = engine.process_frame(sample_frame_rgb, sample_mask)
+        alpha = result["alpha"]
+        assert alpha.min() >= -0.01, f"alpha min {alpha.min():.4f} is below 0"
+        assert alpha.max() <= 1.01, f"alpha max {alpha.max():.4f} is above 1"
+
+    def test_fg_output_range_is_zero_to_one(self, sample_frame_rgb, sample_mask, mock_greenformer):
+        """FG output must be in [0, 1] — required for downstream sRGB conversion and EXR export."""
+        engine = _make_engine_with_mock(mock_greenformer)
+        result = engine.process_frame(sample_frame_rgb, sample_mask)
+        fg = result["fg"]
+        assert fg.min() >= -0.01, f"fg min {fg.min():.4f} is below 0"
+        assert fg.max() <= 1.01, f"fg max {fg.max():.4f} is above 1"
+
 
 # ---------------------------------------------------------------------------
 # Input color space handling
@@ -112,6 +130,15 @@ class TestProcessFrameColorSpace:
         # Should not crash — uint8 is auto-normalized to float32
         result = engine.process_frame(img_uint8, sample_mask)
         assert result["alpha"].dtype == np.float32
+
+    def test_model_called_exactly_once(self, sample_frame_rgb, sample_mask, mock_greenformer):
+        """The neural network model must be called exactly once per process_frame() call.
+
+        Double-inference would double latency and produce incorrect outputs.
+        """
+        engine = _make_engine_with_mock(mock_greenformer)
+        engine.process_frame(sample_frame_rgb, sample_mask)
+        assert mock_greenformer.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -196,3 +223,9 @@ class TestNvidiaGPUProcess:
 
         result = engine.process_frame(sample_frame_rgb, sample_mask)
         assert result["alpha"].dtype == np.float32
+
+    def test_refiner_scale_parameter_accepted(self, sample_frame_rgb, sample_mask, mock_greenformer):
+        """Non-default refiner_scale must not raise — the parameter must be threaded through."""
+        engine = _make_engine_with_mock(mock_greenformer)
+        result = engine.process_frame(sample_frame_rgb, sample_mask, refiner_scale=0.5)
+        assert result["alpha"].shape[:2] == sample_frame_rgb.shape[:2]
