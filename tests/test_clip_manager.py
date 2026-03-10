@@ -330,7 +330,8 @@ class TestGenerateAlphas:
 
         def side_effect_create_file(*args, **kwargs):
             from pathlib import Path
-            target = Path(kwargs.get('direct_output_dir'))
+
+            target = Path(kwargs.get("direct_output_dir"))
             target.mkdir(parents=True, exist_ok=True)
             (target / "output_0.png").write_text("mask")
 
@@ -362,7 +363,8 @@ class TestGenerateAlphas:
 
         def side_effect_create_file(*args, **kwargs):
             from pathlib import Path
-            target = Path(kwargs.get('direct_output_dir'))
+
+            target = Path(kwargs.get("direct_output_dir"))
             target.mkdir(parents=True, exist_ok=True)
             (target / "frame_0.png").write_text("mask")
 
@@ -401,7 +403,6 @@ class TestGenerateAlphas:
 
 
 class TestVideoMaMa:
-
     def test_videomama_skips_if_sequence_exists(self, stage_shot, caplog):
         """
         Scenario: A clip already has a populated AlphaHint directory.
@@ -412,6 +413,7 @@ class TestVideoMaMa:
         mask_path = path / "VideoMamaMaskHint"
         if mask_path.exists():
             import shutil
+
             shutil.rmtree(mask_path)
 
         clip = ClipEntry("shot_exists", str(path))
@@ -456,6 +458,7 @@ class TestVideoMaMa:
             mask_path = path / d
             if mask_path.exists():
                 import shutil
+
                 shutil.rmtree(mask_path)
 
         clip = ClipEntry("shot_no_mask", str(path))
@@ -593,8 +596,8 @@ class TestVideoMaMa:
         mask_dir.mkdir(parents=True)
 
         for i in range(12):
-            cv2.imwrite(str(in_dir / f"frame_{i:04d}.png"), np.zeros((4,4,3), np.uint8))
-            cv2.imwrite(str(mask_dir / f"mask_{i:04d}.png"), np.zeros((4,4), np.uint8))
+            cv2.imwrite(str(in_dir / f"frame_{i:04d}.png"), np.zeros((4, 4, 3), np.uint8))
+            cv2.imwrite(str(mask_dir / f"mask_{i:04d}.png"), np.zeros((4, 4), np.uint8))
 
         clip = ClipEntry("shot_large", str(path))
         clip.find_assets()
