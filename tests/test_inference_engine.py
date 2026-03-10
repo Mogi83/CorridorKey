@@ -202,6 +202,12 @@ class TestProcessFramePostProcessing:
         # Both should produce the same output
         np.testing.assert_allclose(result_2d["alpha"], result_3d["alpha"], atol=1e-5)
 
+    def test_refiner_scale_parameter_accepted(self, sample_frame_rgb, sample_mask, mock_greenformer):
+        """Non-default refiner_scale must not raise — the parameter must be threaded through."""
+        engine = _make_engine_with_mock(mock_greenformer)
+        result = engine.process_frame(sample_frame_rgb, sample_mask, refiner_scale=0.5)
+        assert result["alpha"].shape[:2] == sample_frame_rgb.shape[:2]
+
 
 # ---------------------------------------------------------------------------
 # NVIDIA Specific GPU test
@@ -223,9 +229,3 @@ class TestNvidiaGPUProcess:
 
         result = engine.process_frame(sample_frame_rgb, sample_mask)
         assert result["alpha"].dtype == np.float32
-
-    def test_refiner_scale_parameter_accepted(self, sample_frame_rgb, sample_mask, mock_greenformer):
-        """Non-default refiner_scale must not raise — the parameter must be threaded through."""
-        engine = _make_engine_with_mock(mock_greenformer)
-        result = engine.process_frame(sample_frame_rgb, sample_mask, refiner_scale=0.5)
-        assert result["alpha"].shape[:2] == sample_frame_rgb.shape[:2]
